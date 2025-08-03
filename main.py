@@ -1,4 +1,4 @@
-# main.py - Backend avec authentification
+# main.py - Backend avec authentification simplifiée
 import os
 import jwt
 import bcrypt
@@ -7,11 +7,12 @@ from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import uvicorn
+import re
 
 # Configuration
 SECRET_KEY = "your-secret-key-change-in-production"
@@ -35,13 +36,18 @@ class User(Base):
 # Créer les tables
 Base.metadata.create_all(bind=engine)
 
+# Validation email simple
+def is_valid_email(email: str) -> bool:
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
 # Modèles Pydantic
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 # FastAPI app
@@ -102,10 +108,18 @@ async def health_check():
 # Authentification
 @app.post("/auth/register")
 async def register(user_data: UserCreate, db: Session = Depends(get_db)):
+    # Validation email
+    if not is_valid_email(user_data.email):
+        raise HTTPException(status_code=400, detail="Email invalide")
+    
     # Vérifier si l'utilisateur existe
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email déjà utilisé")
+    
+    # Validation mot de passe
+    if len(user_data.password) < 6:
+        raise HTTPException(status_code=400, detail="Mot de passe trop court (min 6 caractères)")
     
     # Hasher le mot de passe
     hashed_password = bcrypt.hashpw(user_data.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -128,6 +142,10 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/auth/login")
 async def login(form_data: UserLogin, db: Session = Depends(get_db)):
+    # Validation email
+    if not is_valid_email(form_data.email):
+        raise HTTPException(status_code=400, detail="Email invalide")
+    
     user = db.query(User).filter(User.email == form_data.email).first()
     if not user or not bcrypt.checkpw(form_data.password.encode('utf-8'), user.hashed_password.encode('utf-8')):
         raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
